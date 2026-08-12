@@ -9,10 +9,19 @@ A Python-based Open Source Intelligence (OSINT) gathering tool for investigating
 - **DNS Enumeration**: Gather DNS records for a domain
 - **Email Validation**: Validate email addresses and check domain mail configuration
 - **Reverse IP Lookup**: Perform reverse DNS lookup on IP addresses
+- **Intelligent Entity Discovery**: Automatically extract and track related entities:
+  - Extract domains from IP lookups (ISP, organization info)
+  - Extract IPs from domain DNS records
+  - Extract emails from WHOIS data
+  - Extract domains from email validation
+- **Auto-Propagation**: Optional automatic investigation of discovered entities
 - **Modern GUI**: Professional dark-themed graphical interface with:
   - Formatted, easy-to-read results with emojis and sections
   - Interactive map visualization for IP geolocation
+  - Collected Intelligence tab to track all discovered entities
+  - One-click investigation buttons for discovered entities
   - Save results to JSON files with timestamps
+  - Save complete intelligence reports
   - Responsive design with background threading
 
 ## Installation
@@ -34,7 +43,7 @@ Launch the modern GUI application:
 python gui.py
 ```
 
-The GUI provides a professional dark-themed interface with three tabs:
+The GUI provides a professional dark-themed interface with four tabs:
 
 - **IP Lookup**: Enter an IP address and perform geolocation or reverse DNS lookups
   - Click "Show Map" to visualize IP location on an interactive map
@@ -43,6 +52,14 @@ The GUI provides a professional dark-themed interface with three tabs:
   - Click "Save Results" to export data to JSON
 - **Email Validation**: Enter an email address to validate and check domain mail configuration
   - Click "Save Results" to export data to JSON
+- **Collected Intelligence**: View and manage all discovered entities
+  - Automatically extracts IPs, domains, and emails from lookups
+  - Click "Geo" or "Reverse" buttons to investigate discovered IPs
+  - Click "WHOIS" or "DNS" buttons to investigate discovered domains
+  - Click "Validate" button to investigate discovered emails
+  - Enable "Auto-propagate" to automatically investigate new entities
+  - Click "Clear All" to reset collected intelligence
+  - Click "Save Intelligence" to export complete intelligence report
 
 All operations run in background threads to keep the interface responsive. Results are displayed with professional formatting including emojis, sections, and timestamps for easy reading.
 

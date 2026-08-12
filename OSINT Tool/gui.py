@@ -11,6 +11,7 @@ import json
 import os
 import tempfile
 import webbrowser
+import re
 from datetime import datetime
 from osint_tool import OSINTTool
 import folium
@@ -37,6 +38,17 @@ class OSINTGUI:
         self.last_ip_results = None
         self.last_domain_results = None
         self.last_email_results = None
+        
+        # Store discovered entities for propagation
+        self.discovered_entities = {
+            'ips': set(),
+            'domains': set(),
+            'emails': set()
+        }
+        self.entity_history = []  # Track discovery order and relationships
+        
+        # Auto-propagation setting
+        self.auto_propagate = False
         
         # Create GUI components
         self.create_widgets()
@@ -70,11 +82,13 @@ class OSINTGUI:
         self.tab_ip = self.tabview.add("IP Lookup")
         self.tab_domain = self.tabview.add("Domain Lookup")
         self.tab_email = self.tabview.add("Email Validation")
+        self.tab_intel = self.tabview.add("Collected Intelligence")
         
         # Setup each tab
         self.setup_ip_tab()
         self.setup_domain_tab()
         self.setup_email_tab()
+        self.setup_intel_tab()
         
     def setup_ip_tab(self):
         """Setup IP lookup tab."""
@@ -248,6 +262,62 @@ class OSINTGUI:
         )
         self.email_results.pack(fill="both", expand=True, padx=10, pady=(0, 10))
         
+    def setup_intel_tab(self):
+        """Setup collected intelligence tab."""
+        # Control frame
+        control_frame = ctk.CTkFrame(self.tab_intel)
+        control_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Title
+        ctk.CTkLabel(control_frame, text="Discovered Entities", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        
+        # Auto-propagate checkbox
+        self.auto_prop_var = ctk.BooleanVar(value=False)
+        self.auto_prop_check = ctk.CTkCheckBox(
+            control_frame,
+            text="Auto-propagate (automatically investigate discovered entities)",
+            variable=self.auto_prop_var,
+            command=self.toggle_auto_propagate
+        )
+        self.auto_prop_check.pack(anchor="w", padx=10, pady=(0, 10))
+        
+        # Buttons frame
+        button_frame = ctk.CTkFrame(control_frame, fg_color="transparent")
+        button_frame.pack(fill="x", padx=10, pady=(0, 10))
+        
+        # Clear all button
+        ctk.CTkButton(
+            button_frame,
+            text="Clear All",
+            command=self.clear_intelligence,
+            height=40,
+            fg_color="#7c2d12"
+        ).pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        # Save intelligence button
+        ctk.CTkButton(
+            button_frame,
+            text="Save Intelligence",
+            command=self.save_intelligence,
+            height=40,
+            fg_color="#2d8659"
+        ).pack(side="left", fill="x", expand=True, padx=(5, 0))
+        
+        # Entity display frame
+        entity_frame = ctk.CTkFrame(self.tab_intel)
+        entity_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        
+        # Create scrollable frame for entities
+        self.intel_scroll = ctk.CTkScrollableFrame(entity_frame)
+        self.intel_scroll.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Initialize entity displays
+        self.ip_entities_frame = None
+        self.domain_entities_frame = None
+        self.email_entities_frame = None
+        
+        self.update_intel_display()
+        
     def display_results(self, text_widget, data, result_type='ip'):
         """Display results in the specified text widget with formatting."""
         text_widget.delete(1.0, "end")
@@ -260,9 +330,20 @@ class OSINTGUI:
         elif result_type == 'email':
             self.last_email_results = data
         
+        # Extract and store discovered entities
+        if 'error' not in data:
+            self.extract_entities(data, result_type)
+        
         # Format and display results
         formatted = self.format_results(data, result_type)
         text_widget.insert("end", formatted)
+        
+        # Update intelligence display
+        self.update_intel_display()
+        
+        # Auto-propagate if enabled
+        if self.auto_propagate and 'error' not in data:
+            self.auto_propagate_entities(data, result_type)
     
     def format_results(self, data, result_type):
         """Format results for better readability."""
@@ -560,6 +641,291 @@ class OSINTGUI:
             messagebox.showinfo("Success", f"Results saved to {file_path}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save results: {str(e)}")
+    
+    def extract_entities(self, data, result_type):
+        """Extract entities from lookup results."""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        if result_type == 'ip':
+            # Extract IP
+            if 'ip' in data:
+                self.discovered_entities['ips'].add(data['ip'])
+                self.entity_history.append({'type': 'ip', 'value': data['ip'], 'source': result_type, 'timestamp': timestamp})
+            
+            # Extract domain from org/isp if present
+            for field in ['org', 'isp']:
+                if field in data and data[field]:
+                    domains = self.extract_domains_from_text(str(data[field]))
+                    for domain in domains:
+                        if domain not in self.discovered_entities['domains']:
+                            self.discovered_entities['domains'].add(domain)
+                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_{field}", 'timestamp': timestamp})
+        
+        elif result_type == 'domain':
+            # Extract domain
+            if 'domain_name' in data:
+                domain = data['domain_name']
+                if isinstance(domain, list):
+                    domain = domain[0] if domain else None
+                if domain:
+                    self.discovered_entities['domains'].add(str(domain))
+                    self.entity_history.append({'type': 'domain', 'value': str(domain), 'source': result_type, 'timestamp': timestamp})
+            
+            # Extract IPs from DNS records
+            if 'ip_address' in data and data['ip_address'] and not data['ip_address'].startswith('Error'):
+                self.discovered_entities['ips'].add(data['ip_address'])
+                self.entity_history.append({'type': 'ip', 'value': data['ip_address'], 'source': f"{result_type}_dns", 'timestamp': timestamp})
+            
+            # Extract IPs from A records
+            if 'A' in data and data['A']:
+                for record in data['A']:
+                    ips = self.extract_ips_from_text(record)
+                    for ip in ips:
+                        if ip not in self.discovered_entities['ips']:
+                            self.discovered_entities['ips'].add(ip)
+                            self.entity_history.append({'type': 'ip', 'value': ip, 'source': f"{result_type}_A", 'timestamp': timestamp})
+            
+            # Extract domains from name servers
+            if 'name_servers' in data and data['name_servers']:
+                for ns in data['name_servers']:
+                    domains = self.extract_domains_from_text(str(ns))
+                    for domain in domains:
+                        if domain not in self.discovered_entities['domains']:
+                            self.discovered_entities['domains'].add(domain)
+                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_ns", 'timestamp': timestamp})
+            
+            # Extract emails from WHOIS
+            if 'emails' in data and data['emails']:
+                for email in data['emails']:
+                    if email and '@' in str(email):
+                        email_str = str(email).strip()
+                        if email_str not in self.discovered_entities['emails']:
+                            self.discovered_entities['emails'].add(email_str)
+                            self.entity_history.append({'type': 'email', 'value': email_str, 'source': f"{result_type}_whois", 'timestamp': timestamp})
+        
+        elif result_type == 'email':
+            # Extract email
+            if 'valid_format' in data and data['valid_format']:
+                # Reconstruct email from entry
+                email = self.email_entry.get().strip()
+                if email not in self.discovered_entities['emails']:
+                    self.discovered_entities['emails'].add(email)
+                    self.entity_history.append({'type': 'email', 'value': email, 'source': result_type, 'timestamp': timestamp})
+            
+            # Extract domain
+            if 'domain' in data:
+                if data['domain'] not in self.discovered_entities['domains']:
+                    self.discovered_entities['domains'].add(data['domain'])
+                    self.entity_history.append({'type': 'domain', 'value': data['domain'], 'source': f"{result_type}_domain", 'timestamp': timestamp})
+            
+            # Extract domains from MX records
+            if 'mx_records' in data and data['mx_records']:
+                for mx in data['mx_records']:
+                    domains = self.extract_domains_from_text(mx)
+                    for domain in domains:
+                        if domain not in self.discovered_entities['domains']:
+                            self.discovered_entities['domains'].add(domain)
+                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_mx", 'timestamp': timestamp})
+        
+        elif result_type == 'reverse':
+            # Extract IP
+            if 'ip' in data:
+                self.discovered_entities['ips'].add(data['ip'])
+                self.entity_history.append({'type': 'ip', 'value': data['ip'], 'source': result_type, 'timestamp': timestamp})
+            
+            # Extract domain from hostname
+            if 'hostname' in data:
+                domains = self.extract_domains_from_text(data['hostname'])
+                for domain in domains:
+                    if domain not in self.discovered_entities['domains']:
+                        self.discovered_entities['domains'].add(domain)
+                        self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_hostname", 'timestamp': timestamp})
+    
+    def extract_ips_from_text(self, text):
+        """Extract IP addresses from text."""
+        ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
+        return re.findall(ip_pattern, str(text))
+    
+    def extract_domains_from_text(self, text):
+        """Extract domain names from text."""
+        domain_pattern = r'\b[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}\b'
+        return re.findall(domain_pattern, str(text))
+    
+    def update_intel_display(self):
+        """Update the collected intelligence display."""
+        # Clear existing widgets
+        for widget in self.intel_scroll.winfo_children():
+            widget.destroy()
+        
+        # IPs section
+        if self.discovered_entities['ips']:
+            ip_frame = ctk.CTkFrame(self.intel_scroll)
+            ip_frame.pack(fill="x", padx=5, pady=5)
+            
+            ctk.CTkLabel(ip_frame, text=f"🌐 IP Addresses ({len(self.discovered_entities['ips'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+            
+            for ip in sorted(self.discovered_entities['ips']):
+                ip_item = ctk.CTkFrame(ip_frame, fg_color="transparent")
+                ip_item.pack(fill="x", padx=10, pady=2)
+                
+                ctk.CTkLabel(ip_item, text=ip, width=150).pack(side="left", padx=5)
+                
+                ctk.CTkButton(
+                    ip_item,
+                    text="Geo",
+                    width=50,
+                    command=lambda i=ip: self.investigate_ip(i, 'geo')
+                ).pack(side="left", padx=2)
+                
+                ctk.CTkButton(
+                    ip_item,
+                    text="Reverse",
+                    width=50,
+                    command=lambda i=ip: self.investigate_ip(i, 'reverse')
+                ).pack(side="left", padx=2)
+        
+        # Domains section
+        if self.discovered_entities['domains']:
+            domain_frame = ctk.CTkFrame(self.intel_scroll)
+            domain_frame.pack(fill="x", padx=5, pady=5)
+            
+            ctk.CTkLabel(domain_frame, text=f"🔗 Domains ({len(self.discovered_entities['domains'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+            
+            for domain in sorted(self.discovered_entities['domains']):
+                domain_item = ctk.CTkFrame(domain_frame, fg_color="transparent")
+                domain_item.pack(fill="x", padx=10, pady=2)
+                
+                ctk.CTkLabel(domain_item, text=domain, width=200).pack(side="left", padx=5)
+                
+                ctk.CTkButton(
+                    domain_item,
+                    text="WHOIS",
+                    width=60,
+                    command=lambda d=domain: self.investigate_domain(d, 'whois')
+                ).pack(side="left", padx=2)
+                
+                ctk.CTkButton(
+                    domain_item,
+                    text="DNS",
+                    width=60,
+                    command=lambda d=domain: self.investigate_domain(d, 'dns')
+                ).pack(side="left", padx=2)
+        
+        # Emails section
+        if self.discovered_entities['emails']:
+            email_frame = ctk.CTkFrame(self.intel_scroll)
+            email_frame.pack(fill="x", padx=5, pady=5)
+            
+            ctk.CTkLabel(email_frame, text=f"📧 Emails ({len(self.discovered_entities['emails'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+            
+            for email in sorted(self.discovered_entities['emails']):
+                email_item = ctk.CTkFrame(email_frame, fg_color="transparent")
+                email_item.pack(fill="x", padx=10, pady=2)
+                
+                ctk.CTkLabel(email_item, text=email, width=250).pack(side="left", padx=5)
+                
+                ctk.CTkButton(
+                    email_item,
+                    text="Validate",
+                    width=60,
+                    command=lambda e=email: self.investigate_email(e)
+                ).pack(side="left", padx=2)
+        
+        # Show empty state if no entities
+        if not any(self.discovered_entities.values()):
+            ctk.CTkLabel(self.intel_scroll, text="No entities discovered yet. Perform lookups to populate this tab.", font=ctk.CTkFont(size=12)).pack(pady=20)
+    
+    def investigate_ip(self, ip, lookup_type):
+        """Investigate a discovered IP address."""
+        self.tabview.set("IP Lookup")
+        self.ip_entry.delete(0, "end")
+        self.ip_entry.insert(0, ip)
+        if lookup_type == 'geo':
+            self.run_ip_geolocation()
+        else:
+            self.run_reverse_ip()
+    
+    def investigate_domain(self, domain, lookup_type):
+        """Investigate a discovered domain."""
+        self.tabview.set("Domain Lookup")
+        self.domain_entry.delete(0, "end")
+        self.domain_entry.insert(0, domain)
+        if lookup_type == 'whois':
+            self.run_whois()
+        else:
+            self.run_dns()
+    
+    def investigate_email(self, email):
+        """Investigate a discovered email."""
+        self.tabview.set("Email Validation")
+        self.email_entry.delete(0, "end")
+        self.email_entry.insert(0, email)
+        self.run_email_validation()
+    
+    def toggle_auto_propagate(self):
+        """Toggle auto-propagation setting."""
+        self.auto_propagate = self.auto_prop_var.get()
+    
+    def auto_propagate_entities(self, data, result_type):
+        """Automatically investigate newly discovered entities."""
+        # Get newly discovered entities (last few entries in history)
+        new_entities = self.entity_history[-5:] if len(self.entity_history) > 5 else self.entity_history
+        
+        for entity in new_entities:
+            # Skip the original entity we just looked up
+            if entity['source'] == result_type:
+                continue
+            
+            # Investigate with delay to avoid overwhelming
+            if entity['type'] == 'ip':
+                self.root.after(500, lambda i=entity['value']: self.investigate_ip(i, 'geo'))
+            elif entity['type'] == 'domain':
+                self.root.after(500, lambda d=entity['value']: self.investigate_domain(d, 'whois'))
+            elif entity['type'] == 'email':
+                self.root.after(500, lambda e=entity['value']: self.investigate_email(e))
+    
+    def clear_intelligence(self):
+        """Clear all collected intelligence."""
+        self.discovered_entities = {'ips': set(), 'domains': set(), 'emails': set()}
+        self.entity_history = []
+        self.update_intel_display()
+        messagebox.showinfo("Cleared", "All collected intelligence has been cleared.")
+    
+    def save_intelligence(self):
+        """Save collected intelligence to a file."""
+        if not any(self.discovered_entities.values()):
+            messagebox.showerror("Error", "No intelligence to save.")
+            return
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        default_filename = f"intelligence_{timestamp}.json"
+        
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".json",
+            initialfile=default_filename,
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            intelligence_data = {
+                'timestamp': timestamp,
+                'entities': {
+                    'ips': list(self.discovered_entities['ips']),
+                    'domains': list(self.discovered_entities['domains']),
+                    'emails': list(self.discovered_entities['emails'])
+                },
+                'history': self.entity_history
+            }
+            
+            with open(file_path, 'w') as f:
+                json.dump(intelligence_data, f, indent=2, default=str)
+            
+            messagebox.showinfo("Success", f"Intelligence saved to {file_path}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save intelligence: {str(e)}")
     
     def run(self):
         """Start the GUI application."""
