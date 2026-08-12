@@ -9,17 +9,25 @@ A Python-based Open Source Intelligence (OSINT) gathering tool for investigating
 - **DNS Enumeration**: Gather DNS records for a domain
 - **Email Validation**: Validate email addresses and check domain mail configuration
 - **Reverse IP Lookup**: Perform reverse DNS lookup on IP addresses
+- **Security API Integrations**: Premium security intelligence via APIs:
+  - **Have I Been Pwned**: Check if emails have been in data breaches
+  - **VirusTotal**: Scan IPs and domains for malware and reputation
+  - **Spokeo**: People search and background checks (requires commercial subscription)
+- **API Key Management**: Secure local storage for API keys in `~/.osint_tool/api_keys.json`
 - **Intelligent Entity Discovery**: Automatically extract and track related entities:
   - Extract domains from IP lookups (ISP, organization info)
   - Extract IPs from domain DNS records
   - Extract emails from WHOIS data
   - Extract domains from email validation
+  - Extract entities from security API results (breach domains, AS owners, etc.)
 - **Auto-Propagation**: Optional automatic investigation of discovered entities
 - **Modern GUI**: Professional dark-themed graphical interface with:
   - Formatted, easy-to-read results with emojis and sections
   - Interactive map visualization for IP geolocation
   - Collected Intelligence tab to track all discovered entities
   - One-click investigation buttons for discovered entities
+  - API Configuration tab for managing service credentials
+  - Security APIs tab for premium lookups
   - Save results to JSON files with timestamps
   - Save complete intelligence reports
   - Responsive design with background threading
@@ -33,6 +41,22 @@ A Python-based Open Source Intelligence (OSINT) gathering tool for investigating
 pip install -r requirements.txt
 ```
 
+### API Key Setup (Optional)
+
+For premium security API features, you'll need to obtain API keys:
+
+- **Have I Been Pwned**: Get a free API key at https://haveibeenpwned.com/API/Key
+- **VirusTotal**: Get a free API key at https://www.virustotal.com/ (requires account registration)
+- **Spokeo**: Requires commercial subscription - contact Spokeo for API access
+
+Once you have your API keys:
+1. Launch the GUI: `python gui.py`
+2. Go to the "API Configuration" tab
+3. Enter your API keys in the respective fields
+4. Click the save button for each service
+
+Keys are stored locally in `~/.osint_tool/api_keys.json`
+
 ## Usage
 
 ### Graphical User Interface (Recommended)
@@ -43,7 +67,7 @@ Launch the modern GUI application:
 python gui.py
 ```
 
-The GUI provides a professional dark-themed interface with four tabs:
+The GUI provides a professional dark-themed interface with six tabs:
 
 - **IP Lookup**: Enter an IP address and perform geolocation or reverse DNS lookups
   - Click "Show Map" to visualize IP location on an interactive map
@@ -60,6 +84,16 @@ The GUI provides a professional dark-themed interface with four tabs:
   - Enable "Auto-propagate" to automatically investigate new entities
   - Click "Clear All" to reset collected intelligence
   - Click "Save Intelligence" to export complete intelligence report
+- **API Configuration**: Manage API keys for premium services
+  - Enter and save API keys for Have I Been Pwned, VirusTotal, and Spokeo
+  - Keys are stored securely in `~/.osint_tool/api_keys.json`
+  - Free API keys available for HIBP and VirusTotal
+- **Security APIs**: Perform premium security lookups
+  - **HIBP Breach Check**: Check if an email has been in data breaches
+  - **VT IP Scan**: Scan IP addresses with VirusTotal for malware and reputation
+  - **VT Domain Scan**: Scan domains with VirusTotal for malware and reputation
+  - **Spokeo Search**: People search and background checks (requires commercial subscription)
+  - Click "Save Results" to export security API data to JSON
 
 All operations run in background threads to keep the interface responsive. Results are displayed with professional formatting including emojis, sections, and timestamps for easy reading.
 
@@ -150,6 +184,7 @@ python osint_tool.py --domain example.com --dns --json
 - customtkinter (for GUI)
 - folium (for map visualization)
 - pillow (for image handling)
+- pyhibp (for Have I Been Pwned API)
 
 ## Disclaimer
 

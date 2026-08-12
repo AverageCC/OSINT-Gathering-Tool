@@ -83,12 +83,16 @@ class OSINTGUI:
         self.tab_domain = self.tabview.add("Domain Lookup")
         self.tab_email = self.tabview.add("Email Validation")
         self.tab_intel = self.tabview.add("Collected Intelligence")
+        self.tab_api = self.tabview.add("API Configuration")
+        self.tab_security = self.tabview.add("Security APIs")
         
         # Setup each tab
         self.setup_ip_tab()
         self.setup_domain_tab()
         self.setup_email_tab()
         self.setup_intel_tab()
+        self.setup_api_tab()
+        self.setup_security_tab()
         
     def setup_ip_tab(self):
         """Setup IP lookup tab."""
@@ -318,6 +322,237 @@ class OSINTGUI:
         
         self.update_intel_display()
         
+        # Store security results for saving
+        self.last_security_results = None
+        
+    def setup_api_tab(self):
+        """Setup API configuration tab."""
+        # Main frame
+        main_frame = ctk.CTkFrame(self.tab_api)
+        main_frame.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # Title
+        ctk.CTkLabel(main_frame, text="API Key Configuration", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        
+        ctk.CTkLabel(main_frame, text="Configure your API keys for premium services. Keys are stored locally in ~/.osint_tool/api_keys.json", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=10, pady=(0, 10))
+        
+        # Scrollable frame for API keys
+        scroll_frame = ctk.CTkScrollableFrame(main_frame)
+        scroll_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        
+        # HIBP API Key
+        hibp_frame = ctk.CTkFrame(scroll_frame)
+        hibp_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(hibp_frame, text="Have I Been Pwned API Key", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        ctk.CTkLabel(hibp_frame, text="Get your free API key at: https://haveibeenpwned.com/API/Key", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=10, pady=(0, 5))
+        
+        self.hibp_key_entry = ctk.CTkEntry(hibp_frame, placeholder_text="Enter HIBP API key")
+        self.hibp_key_entry.pack(fill="x", padx=10, pady=(0, 5))
+        
+        # Load existing key
+        if 'hibp' in self.tool.api_keys:
+            self.hibp_key_entry.insert(0, self.tool.api_keys['hibp'])
+        
+        ctk.CTkButton(hibp_frame, text="Save HIBP Key", command=lambda: self.save_api_key('hibp', self.hibp_key_entry)).pack(fill="x", padx=10, pady=(0, 10))
+        
+        # VirusTotal API Key
+        vt_frame = ctk.CTkFrame(scroll_frame)
+        vt_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(vt_frame, text="VirusTotal API Key", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        ctk.CTkLabel(vt_frame, text="Get your free API key at: https://www.virustotal.com/", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=10, pady=(0, 5))
+        
+        self.vt_key_entry = ctk.CTkEntry(vt_frame, placeholder_text="Enter VirusTotal API key")
+        self.vt_key_entry.pack(fill="x", padx=10, pady=(0, 5))
+        
+        # Load existing key
+        if 'virustotal' in self.tool.api_keys:
+            self.vt_key_entry.insert(0, self.tool.api_keys['virustotal'])
+        
+        ctk.CTkButton(vt_frame, text="Save VirusTotal Key", command=lambda: self.save_api_key('virustotal', self.vt_key_entry)).pack(fill="x", padx=10, pady=(0, 10))
+        
+        # Spokeo API Key
+        spokeo_frame = ctk.CTkFrame(scroll_frame)
+        spokeo_frame.pack(fill="x", padx=5, pady=5)
+        
+        ctk.CTkLabel(spokeo_frame, text="Spokeo API Key", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        ctk.CTkLabel(spokeo_frame, text="Requires commercial subscription. Contact Spokeo for API access.", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=10, pady=(0, 5))
+        
+        self.spokeo_key_entry = ctk.CTkEntry(spokeo_frame, placeholder_text="Enter Spokeo API key")
+        self.spokeo_key_entry.pack(fill="x", padx=10, pady=(0, 5))
+        
+        # Load existing key
+        if 'spokeo' in self.tool.api_keys:
+            self.spokeo_key_entry.insert(0, self.tool.api_keys['spokeo'])
+        
+        ctk.CTkButton(spokeo_frame, text="Save Spokeo Key", command=lambda: self.save_api_key('spokeo', self.spokeo_key_entry)).pack(fill="x", padx=10, pady=(0, 10))
+    
+    def setup_security_tab(self):
+        """Setup security APIs tab."""
+        # Input frame
+        input_frame = ctk.CTkFrame(self.tab_security)
+        input_frame.pack(fill="x", padx=10, pady=10)
+        
+        # Title
+        ctk.CTkLabel(input_frame, text="Security API Lookups", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        
+        # Query entry
+        ctk.CTkLabel(input_frame, text="Query (IP, Domain, or Email):", font=ctk.CTkFont(size=12)).pack(anchor="w", padx=10, pady=(5, 2))
+        self.security_query_entry = ctk.CTkEntry(input_frame, placeholder_text="Enter IP, domain, or email")
+        self.security_query_entry.pack(fill="x", padx=10, pady=(0, 10))
+        
+        # Buttons frame
+        button_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
+        button_frame.pack(fill="x", padx=10, pady=(0, 10))
+        
+        # HIBP button
+        self.hibp_btn = ctk.CTkButton(
+            button_frame,
+            text="HIBP Breach Check",
+            command=self.run_hibp_check,
+            height=40
+        )
+        self.hibp_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        
+        # VirusTotal IP button
+        self.vt_ip_btn = ctk.CTkButton(
+            button_frame,
+            text="VT IP Scan",
+            command=self.run_vt_ip_scan,
+            height=40
+        )
+        self.vt_ip_btn.pack(side="left", fill="x", expand=True, padx=(5, 5))
+        
+        # VirusTotal Domain button
+        self.vt_domain_btn = ctk.CTkButton(
+            button_frame,
+            text="VT Domain Scan",
+            command=self.run_vt_domain_scan,
+            height=40
+        )
+        self.vt_domain_btn.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        
+        # Spokeo button
+        self.spokeo_btn = ctk.CTkButton(
+            input_frame,
+            text="Spokeo Search",
+            command=self.run_spokeo_search,
+            height=40
+        )
+        self.spokeo_btn.pack(fill="x", padx=10, pady=(0, 10))
+        
+        # Save button
+        self.save_security_btn = ctk.CTkButton(
+            input_frame,
+            text="Save Results",
+            command=lambda: self.save_results('security'),
+            height=40,
+            fg_color="#7c2d12"
+        )
+        self.save_security_btn.pack(fill="x", padx=10, pady=(0, 10))
+        
+        # Results area
+        ctk.CTkLabel(self.tab_security, text="Results:", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        
+        self.security_results = scrolledtext.ScrolledText(
+            self.tab_security,
+            wrap="word",
+            font=("Consolas", 10),
+            bg="#1a1a1a",
+            fg="#ffffff"
+        )
+        self.security_results.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+    
+    def save_api_key(self, service, entry_widget):
+        """Save an API key for a service."""
+        key = entry_widget.get().strip()
+        if key:
+            self.tool.set_api_key(service, key)
+            messagebox.showinfo("Success", f"{service.capitalize()} API key saved successfully.")
+        else:
+            messagebox.showerror("Error", "Please enter an API key.")
+    
+    def run_hibp_check(self):
+        """Run HIBP breach check in a separate thread."""
+        query = self.security_query_entry.get().strip()
+        if not query or '@' not in query:
+            messagebox.showerror("Error", "Please enter a valid email address")
+            return
+        
+        self.hibp_btn.configure(state="disabled", text="Checking...")
+        
+        def lookup():
+            try:
+                results = self.tool.hibp_breach_check(query)
+                self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
+            except Exception as e:
+                self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
+            finally:
+                self.root.after(0, lambda: self.hibp_btn.configure(state="normal", text="HIBP Breach Check"))
+        
+        threading.Thread(target=lookup, daemon=True).start()
+    
+    def run_vt_ip_scan(self):
+        """Run VirusTotal IP scan in a separate thread."""
+        query = self.security_query_entry.get().strip()
+        if not query:
+            messagebox.showerror("Error", "Please enter an IP address")
+            return
+        
+        self.vt_ip_btn.configure(state="disabled", text="Scanning...")
+        
+        def lookup():
+            try:
+                results = self.tool.virustotal_ip_scan(query)
+                self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
+            except Exception as e:
+                self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
+            finally:
+                self.root.after(0, lambda: self.vt_ip_btn.configure(state="normal", text="VT IP Scan"))
+        
+        threading.Thread(target=lookup, daemon=True).start()
+    
+    def run_vt_domain_scan(self):
+        """Run VirusTotal domain scan in a separate thread."""
+        query = self.security_query_entry.get().strip()
+        if not query:
+            messagebox.showerror("Error", "Please enter a domain")
+            return
+        
+        self.vt_domain_btn.configure(state="disabled", text="Scanning...")
+        
+        def lookup():
+            try:
+                results = self.tool.virustotal_domain_scan(query)
+                self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
+            except Exception as e:
+                self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
+            finally:
+                self.root.after(0, lambda: self.vt_domain_btn.configure(state="normal", text="VT Domain Scan"))
+        
+        threading.Thread(target=lookup, daemon=True).start()
+    
+    def run_spokeo_search(self):
+        """Run Spokeo search in a separate thread."""
+        query = self.security_query_entry.get().strip()
+        if not query:
+            messagebox.showerror("Error", "Please enter a search query")
+            return
+        
+        self.spokeo_btn.configure(state="disabled", text="Searching...")
+        
+        def lookup():
+            try:
+                results = self.tool.spokeo_search(query)
+                self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
+            except Exception as e:
+                self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
+            finally:
+                self.root.after(0, lambda: self.spokeo_btn.configure(state="normal", text="Spokeo Search"))
+        
+        threading.Thread(target=lookup, daemon=True).start()
+        
     def display_results(self, text_widget, data, result_type='ip'):
         """Display results in the specified text widget with formatting."""
         text_widget.delete(1.0, "end")
@@ -329,6 +564,8 @@ class OSINTGUI:
             self.last_domain_results = data
         elif result_type == 'email':
             self.last_email_results = data
+        elif result_type == 'security':
+            self.last_security_results = data
         
         # Extract and store discovered entities
         if 'error' not in data:
@@ -447,6 +684,75 @@ class OSINTGUI:
                 output.append(f"Aliases: {', '.join(data['aliases'])}")
             if 'ip_addresses' in data and data['ip_addresses']:
                 output.append(f"IP Addresses: {', '.join(data['ip_addresses'])}")
+        
+        elif result_type == 'security':
+            if 'email' in data and 'breaches' in data:
+                # HIBP results
+                output.append("🔓 HAVE I BEEN PWNED - BREACH CHECK")
+                output.append("-" * 40)
+                output.append(f"Email: {data['email']}")
+                output.append(f"Breaches Found: {'Yes' if data.get('found') else 'No'}")
+                if data.get('breach_count'):
+                    output.append(f"Total Breaches: {data['breach_count']}")
+                if data.get('breaches'):
+                    output.append("")
+                    output.append("BREACH DETAILS:")
+                    for i, breach in enumerate(data['breaches'], 1):
+                        output.append(f"\n{i}. {breach.get('name', 'Unknown')}")
+                        output.append(f"   Title: {breach.get('title', 'N/A')}")
+                        output.append(f"   Domain: {breach.get('domain', 'N/A')}")
+                        output.append(f"   Breach Date: {breach.get('breach_date', 'N/A')}")
+                        output.append(f"   Pwn Count: {breach.get('pwn_count', 'N/A')}")
+                        output.append(f"   Data Classes: {', '.join(breach.get('data_classes', []))}")
+                        output.append(f"   Verified: {'Yes' if breach.get('is_verified') else 'No'}")
+                        output.append(f"   Sensitive: {'Yes' if breach.get('is_sensitive') else 'No'}")
+            
+            elif 'ip' in data and 'reputation' in data:
+                # VirusTotal IP results
+                output.append("🦠 VIRUSTOTAL - IP SCAN")
+                output.append("-" * 40)
+                output.append(f"IP: {data['ip']}")
+                output.append(f"Reputation Score: {data['reputation']}")
+                if data.get('country'):
+                    output.append(f"Country: {data['country']}")
+                if data.get('asn'):
+                    output.append(f"ASN: {data['asn']}")
+                if data.get('as_owner'):
+                    output.append(f"AS Owner: {data['as_owner']}")
+                if data.get('last_analysis_stats'):
+                    output.append("")
+                    output.append("ANALYSIS STATS:")
+                    for engine, count in data['last_analysis_stats'].items():
+                        output.append(f"  {engine}: {count}")
+            
+            elif 'domain' in data and 'reputation' in data:
+                # VirusTotal Domain results
+                output.append("🦠 VIRUSTOTAL - DOMAIN SCAN")
+                output.append("-" * 40)
+                output.append(f"Domain: {data['domain']}")
+                output.append(f"Reputation Score: {data['reputation']}")
+                if data.get('categories'):
+                    output.append(f"Categories: {data['categories']}")
+                if data.get('creation_date'):
+                    output.append(f"Creation Date: {data['creation_date']}")
+                if data.get('last_analysis_stats'):
+                    output.append("")
+                    output.append("ANALYSIS STATS:")
+                    for engine, count in data['last_analysis_stats'].items():
+                        output.append(f"  {engine}: {count}")
+            
+            elif 'query' in data and 'search_type' in data:
+                # Spokeo results
+                output.append("👤 SPOKEO SEARCH")
+                output.append("-" * 40)
+                output.append(f"Query: {data['query']}")
+                output.append(f"Search Type: {data['search_type']}")
+                output.append(f"Total Results: {data.get('total_results', 0)}")
+                if data.get('results'):
+                    output.append("")
+                    output.append("RESULTS:")
+                    for i, result in enumerate(data['results'][:10], 1):  # Limit to first 10
+                        output.append(f"\n{i}. {str(result)[:200]}...")  # Truncate long results
         
         output.append("")
         output.append("=" * 60)
@@ -611,6 +917,9 @@ class OSINTGUI:
         elif result_type == 'email':
             data = self.last_email_results
             default_name = "email_results"
+        elif result_type == 'security':
+            data = self.last_security_results
+            default_name = "security_results"
         
         if not data:
             messagebox.showerror("Error", "No results to save. Please perform a lookup first.")
@@ -740,6 +1049,63 @@ class OSINTGUI:
                     if domain not in self.discovered_entities['domains']:
                         self.discovered_entities['domains'].add(domain)
                         self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_hostname", 'timestamp': timestamp})
+        
+        elif result_type == 'security':
+            # Extract entities from security API results
+            if 'email' in data:
+                # HIBP results
+                if data.get('email') and '@' in data['email']:
+                    email = data['email']
+                    if email not in self.discovered_entities['emails']:
+                        self.discovered_entities['emails'].add(email)
+                        self.entity_history.append({'type': 'email', 'value': email, 'source': 'hibp', 'timestamp': timestamp})
+                
+                # Extract domains from breach data
+                if data.get('breaches'):
+                    for breach in data['breaches']:
+                        if breach.get('domain'):
+                            domain = breach['domain']
+                            if domain not in self.discovered_entities['domains']:
+                                self.discovered_entities['domains'].add(domain)
+                                self.entity_history.append({'type': 'domain', 'value': domain, 'source': 'hibp_breach', 'timestamp': timestamp})
+            
+            elif 'ip' in data and 'reputation' in data:
+                # VirusTotal IP results
+                ip = data['ip']
+                if ip not in self.discovered_entities['ips']:
+                    self.discovered_entities['ips'].add(ip)
+                    self.entity_history.append({'type': 'ip', 'value': ip, 'source': 'virustotal_ip', 'timestamp': timestamp})
+                
+                # Extract domain from AS owner
+                if data.get('as_owner'):
+                    domains = self.extract_domains_from_text(data['as_owner'])
+                    for domain in domains:
+                        if domain not in self.discovered_entities['domains']:
+                            self.discovered_entities['domains'].add(domain)
+                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': 'virustotal_as_owner', 'timestamp': timestamp})
+            
+            elif 'domain' in data and 'reputation' in data:
+                # VirusTotal Domain results
+                domain = data['domain']
+                if domain not in self.discovered_entities['domains']:
+                    self.discovered_entities['domains'].add(domain)
+                    self.entity_history.append({'type': 'domain', 'value': domain, 'source': 'virustotal_domain', 'timestamp': timestamp})
+            
+            elif 'query' in data and 'search_type' in data:
+                # Spokeo results
+                query = data['query']
+                if '@' in query:
+                    # Email query
+                    if query not in self.discovered_entities['emails']:
+                        self.discovered_entities['emails'].add(query)
+                        self.entity_history.append({'type': 'email', 'value': query, 'source': 'spokeo', 'timestamp': timestamp})
+                else:
+                    # Could be domain or other
+                    domains = self.extract_domains_from_text(query)
+                    for domain in domains:
+                        if domain not in self.discovered_entities['domains']:
+                            self.discovered_entities['domains'].add(domain)
+                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': 'spokeo', 'timestamp': timestamp})
     
     def extract_ips_from_text(self, text):
         """Extract IP addresses from text."""

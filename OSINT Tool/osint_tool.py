@@ -12,7 +12,8 @@ import requests
 import socket
 import whois
 import dns.resolver
-
+import os
+from pathlib import Path
 
 class OSINTTool:
     """Main OSINT Tool class for gathering intelligence."""
@@ -22,6 +23,31 @@ class OSINTTool:
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
+        self.api_keys = self.load_api_keys()
+    
+    def load_api_keys(self):
+        """Load API keys from config file."""
+        config_path = Path.home() / '.osint_tool' / 'api_keys.json'
+        if config_path.exists():
+            try:
+                with open(config_path, 'r') as f:
+                    return json.load(f)
+            except:
+                pass
+        return {}
+    
+    def save_api_keys(self, api_keys):
+        """Save API keys to config file."""
+        config_path = Path.home() / '.osint_tool'
+        config_path.mkdir(parents=True, exist_ok=True)
+        with open(config_path / 'api_keys.json', 'w') as f:
+            json.dump(api_keys, f, indent=2)
+        self.api_keys = api_keys
+    
+    def set_api_key(self, service, key):
+        """Set an API key for a service."""
+        self.api_keys[service] = key
+        self.save_api_keys(self.api_keys)
     
     def ip_geolocation(self, ip: str) -> Dict[str, Any]:
         """
@@ -157,6 +183,183 @@ class OSINTTool:
                 'hostname': hostname[0],
                 'aliases': hostname[1],
                 'ip_addresses': hostname[2]
+            }
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def hibp_breach_check(self, email: str) -> Dict[str, Any]:
+        """
+        Check if email has been in any data breaches using Have I Been Pwned API.
+        """
+        try:
+            # Use HIBP API (requires API key for rate limit increase)
+            api_key = self.api_keys.get('hibp', '')
+            url = f'https://haveibeenpwned.com/api/v3/breachedaccount/{email}'
+            headers = {
+                'User-Agent': 'OSINT Tool',
+                'hibp-api-key': api_key
+            }
+            
+            response = self.session.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 404:
+                return {
+                    'email': email,
+                    'found': False,
+                    'breaches': [],
+                    'message': 'No breaches found'
+                }
+            elif response.status_code == 401:
+                return {'error': 'Invalid HIBP API key'}
+            elif response.status_code == 429:
+                return {'error': 'Rate limit exceeded. Please add your HIBP API key.'}
+            
+            response.raise_for_status()
+            breaches = response.json()
+            
+            breach_list = []
+            for breach in breaches:
+                breach_list.append({
+                    'name': breach.get('Name'),
+                    'title': breach.get('Title'),
+                    'domain': breach.get('Domain'),
+                    'breach_date': breach.get('BreachDate'),
+                    'added_date': breach.get('AddedDate'),
+                    'pwn_count': breach.get('PwnCount'),
+                    'description': breach.get('Description'),
+                    'data_classes': breach.get('DataClasses', []),
+                    'is_verified': breach.get('IsVerified'),
+                    'is_fabricated': breach.get('IsFabricated'),
+                    'is_sensitive': breach.get('IsSensitive'),
+                    'is_retired': breach.get('IsRetired'),
+                    'is_spam_list': breach.get('IsSpamList')
+                })
+            
+            return {
+                'email': email,
+                'found': True,
+                'breach_count': len(breach_list),
+                'breaches': breach_list
+            }
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def virustotal_ip_scan(self, ip: str) -> Dict[str, Any]:
+        """
+        Scan IP address using VirusTotal API.
+        """
+        try:
+            api_key = self.api_keys.get('virustotal', '')
+            if not api_key:
+                return {'error': 'VirusTotal API key required'}
+            
+            url = f'https://www.virustotal.com/api/v3/ip_addresses/{ip}'
+            headers = {'x-apikey': api_key}
+            
+            response = self.session.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 401:
+                return {'error': 'Invalid VirusTotal API key'}
+            elif response.status_code == 404:
+                return {'error': 'IP not found in VirusTotal database'}
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            attributes = data.get('data', {}).get('attributes', {})
+            
+            # Extract reputation and analysis
+            return {
+                'ip': ip,
+                'reputation': attributes.get('reputation', 0),
+                'last_analysis_stats': attributes.get('last_analysis_stats', {}),
+                'country': attributes.get('country'),
+                'continent': attributes.get('continent'),
+                'network': attributes.get('network'),
+                'asn': attributes.get('asn'),
+                'as_owner': attributes.get('as_owner'),
+                'total_votes': attributes.get('total_votes', {}),
+                'last_https_certificate': attributes.get('last_https_certificate', {}),
+                'last_modification_date': attributes.get('last_modification_date'),
+                'creation_date': attributes.get('creation_date')
+            }
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def virustotal_domain_scan(self, domain: str) -> Dict[str, Any]:
+        """
+        Scan domain using VirusTotal API.
+        """
+        try:
+            api_key = self.api_keys.get('virustotal', '')
+            if not api_key:
+                return {'error': 'VirusTotal API key required'}
+            
+            url = f'https://www.virustotal.com/api/v3/domains/{domain}'
+            headers = {'x-apikey': api_key}
+            
+            response = self.session.get(url, headers=headers, timeout=10)
+            
+            if response.status_code == 401:
+                return {'error': 'Invalid VirusTotal API key'}
+            elif response.status_code == 404:
+                return {'error': 'Domain not found in VirusTotal database'}
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            attributes = data.get('data', {}).get('attributes', {})
+            
+            return {
+                'domain': domain,
+                'reputation': attributes.get('reputation', 0),
+                'last_analysis_stats': attributes.get('last_analysis_stats', {}),
+                'last_dns_records': attributes.get('last_dns_records', []),
+                'categories': attributes.get('categories', {}),
+                'whois': attributes.get('whois', ''),
+                'creation_date': attributes.get('creation_date'),
+                'last_modification_date': attributes.get('last_modification_date'),
+                'last_update_date': attributes.get('last_update_date'),
+                'total_votes': attributes.get('total_votes', {})
+            }
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def spokeo_search(self, query: str, search_type: str = 'email') -> Dict[str, Any]:
+        """
+        Search Spokeo API (requires API key).
+        Note: Spokeo API requires commercial subscription.
+        """
+        try:
+            api_key = self.api_keys.get('spokeo', '')
+            if not api_key:
+                return {'error': 'Spokeo API key required'}
+            
+            # Spokeo API endpoint (this is a placeholder - actual endpoint may vary)
+            # Spokeo's API is not publicly documented and requires business partnership
+            url = 'https://api.spokeo.com/v1/search'
+            
+            params = {
+                'key': api_key,
+                'query': query,
+                'type': search_type
+            }
+            
+            response = self.session.get(url, params=params, timeout=10)
+            
+            if response.status_code == 401:
+                return {'error': 'Invalid Spokeo API key'}
+            elif response.status_code == 403:
+                return {'error': 'Spokeo API access forbidden. Check subscription.'}
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            return {
+                'query': query,
+                'search_type': search_type,
+                'results': data.get('results', []),
+                'total_results': data.get('total', 0)
             }
         except Exception as e:
             return {'error': str(e)}
