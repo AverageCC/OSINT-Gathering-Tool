@@ -12,8 +12,9 @@ A Python-based Open Source Intelligence (OSINT) gathering tool for investigating
 - **Security API Integrations**: Premium security intelligence via APIs:
   - **Have I Been Pwned**: Check if emails have been in data breaches
   - **VirusTotal**: Scan IPs and domains for malware and reputation
+  - **WhitePages**: Person search and profile investigation (requires API key)
   - **Spokeo**: People search and background checks (requires commercial subscription)
-- **API Key Management**: Secure local storage for API keys in `~/.osint_tool/api_keys.json`
+- **API Key Management**: Secure environment variable storage via .env file
 - **Intelligent Entity Discovery**: Automatically extract and track related entities:
   - Extract domains from IP lookups (ISP, organization info)
   - Extract IPs from domain DNS records
@@ -47,15 +48,15 @@ For premium security API features, you'll need to obtain API keys:
 
 - **Have I Been Pwned**: Get a free API key at https://haveibeenpwned.com/API/Key
 - **VirusTotal**: Get a free API key at https://www.virustotal.com/ (requires account registration)
+- **WhitePages**: Get your API key at https://developer.whitepages.com/
 - **Spokeo**: Requires commercial subscription - contact Spokeo for API access
 
 Once you have your API keys:
-1. Launch the GUI: `python gui.py`
-2. Go to the "API Configuration" tab
-3. Enter your API keys in the respective fields
-4. Click the save button for each service
+1. Copy `.env.example` to `.env`: `cp .env.example .env`
+2. Edit `.env` and add your actual API keys
+3. Restart the application
 
-Keys are stored locally in `~/.osint_tool/api_keys.json`
+API keys are loaded from environment variables for security. The `.env` file should never be committed to version control.
 
 ## Usage
 
@@ -84,14 +85,15 @@ The GUI provides a professional dark-themed interface with six tabs:
   - Enable "Auto-propagate" to automatically investigate new entities
   - Click "Clear All" to reset collected intelligence
   - Click "Save Intelligence" to export complete intelligence report
-- **API Configuration**: Manage API keys for premium services
-  - Enter and save API keys for Have I Been Pwned, VirusTotal, and Spokeo
-  - Keys are stored securely in `~/.osint_tool/api_keys.json`
-  - Free API keys available for HIBP and VirusTotal
+- **API Configuration**: View API key configuration status
+  - Instructions for setting up API keys via .env file
+  - Shows whether .env file is detected
+  - API keys loaded from environment variables for security
 - **Security APIs**: Perform premium security lookups
   - **HIBP Breach Check**: Check if an email has been in data breaches
   - **VT IP Scan**: Scan IP addresses with VirusTotal for malware and reputation
   - **VT Domain Scan**: Scan domains with VirusTotal for malware and reputation
+  - **WhitePages Person Search**: Search for person profiles by email, phone, or name
   - **Spokeo Search**: People search and background checks (requires commercial subscription)
   - Click "Save Results" to export security API data to JSON
 
@@ -185,6 +187,7 @@ python osint_tool.py --domain example.com --dns --json
 - folium (for map visualization)
 - pillow (for image handling)
 - pyhibp (for Have I Been Pwned API)
+- python-dotenv (for environment variable management)
 
 ## Disclaimer
 

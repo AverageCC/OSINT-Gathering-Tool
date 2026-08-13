@@ -5,3 +5,4 @@ customtkinter>=5.2.0
 folium>=0.14.0
 pillow>=10.0.0
 pyhibp>=3.0.0
+python-dotenv>=1.0.0

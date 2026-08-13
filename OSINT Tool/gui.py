@@ -4,6 +4,7 @@ OSINT Tool GUI - Modern Graphical User Interface
 A professional interface for the OSINT gathering tool using CustomTkinter.
 """
 
+import tkinter as tk
 import customtkinter as ctk
 from tkinter import messagebox, scrolledtext, filedialog
 import threading
@@ -11,9 +12,10 @@ import json
 import os
 import tempfile
 import webbrowser
-import re
 from datetime import datetime
 from osint_tool import OSINTTool
+from functions import format_results, EntityExtractor
+from api_handlers import SecurityAPIHandler
 import folium
 
 
@@ -23,29 +25,30 @@ class OSINTGUI:
     def __init__(self):
         # Set appearance mode and default color theme
         ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("blue")
+        ctk.set_default_color_theme("dark-blue")
         
         # Create main window
         self.root = ctk.CTk()
         self.root.title("OSINT Tool - Open Source Intelligence")
-        self.root.geometry("900x700")
-        self.root.minsize(800, 600)
+        self.root.geometry("1000x750")
+        self.root.minsize(900, 650)
+        
+        # Configure grid weights for responsive layout
+        self.root.grid_columnconfigure(0, weight=1)
+        self.root.grid_rowconfigure(0, weight=1)
         
         # Initialize OSINT tool
         self.tool = OSINTTool()
+        self.security_handler = SecurityAPIHandler()
         
         # Store last results for saving
         self.last_ip_results = None
         self.last_domain_results = None
         self.last_email_results = None
+        self.last_security_results = None
         
-        # Store discovered entities for propagation
-        self.discovered_entities = {
-            'ips': set(),
-            'domains': set(),
-            'emails': set()
-        }
-        self.entity_history = []  # Track discovery order and relationships
+        # Initialize entity extractor
+        self.entity_extractor = EntityExtractor()
         
         # Auto-propagation setting
         self.auto_propagate = False
@@ -56,27 +59,43 @@ class OSINTGUI:
     def create_widgets(self):
         """Create all GUI widgets."""
         # Main container with padding
-        main_frame = ctk.CTkFrame(self.root)
-        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+        main_frame = ctk.CTkFrame(self.root, fg_color="#0d1117")
+        main_frame.pack(fill="both", expand=True, padx=0, pady=0)
         
-        # Title
-        title_label = ctk.CTkLabel(
-            main_frame, 
+        # Header with gradient effect
+        header_frame = ctk.CTkFrame(main_frame, fg_color="#161b22", height=80)
+        header_frame.pack(fill="x", padx=0, pady=(0, 0))
+        header_frame.pack_propagate(False)
+        
+        # Logo/title section
+        title_container = ctk.CTkFrame(header_frame, fg_color="transparent")
+        title_container.pack(side="left", padx=30, pady=15)
+        
+        ctk.CTkLabel(
+            title_container,
+            text="",
+            font=ctk.CTkFont(size=32)
+        ).pack(side="left", padx=(0, 10))
+        
+        title_text = ctk.CTkFrame(title_container, fg_color="transparent")
+        title_text.pack(side="left")
+        
+        ctk.CTkLabel(
+            title_text,
             text="OSINT Tool",
             font=ctk.CTkFont(size=28, weight="bold")
-        )
-        title_label.pack(pady=(0, 10))
+        ).pack(anchor="w")
         
-        subtitle_label = ctk.CTkLabel(
-            main_frame,
-            text="Open Source Intelligence Gathering Tool",
-            font=ctk.CTkFont(size=14)
-        )
-        subtitle_label.pack(pady=(0, 20))
+        ctk.CTkLabel(
+            title_text,
+            text="Open Source Intelligence Platform",
+            font=ctk.CTkFont(size=12),
+            text_color="#8b949e"
+        ).pack(anchor="w")
         
         # Tabview for different tools
-        self.tabview = ctk.CTkTabview(main_frame)
-        self.tabview.pack(fill="both", expand=True)
+        self.tabview = ctk.CTkTabview(main_frame, fg_color="#0d1117")
+        self.tabview.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Create tabs
         self.tab_ip = self.tabview.add("IP Lookup")
@@ -322,9 +341,6 @@ class OSINTGUI:
         
         self.update_intel_display()
         
-        # Store security results for saving
-        self.last_security_results = None
-        
     def setup_api_tab(self):
         """Setup API configuration tab."""
         # Main frame
@@ -334,72 +350,44 @@ class OSINTGUI:
         # Title
         ctk.CTkLabel(main_frame, text="API Key Configuration", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
         
-        ctk.CTkLabel(main_frame, text="Configure your API keys for premium services. Keys are stored locally in ~/.osint_tool/api_keys.json", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=10, pady=(0, 10))
+        ctk.CTkLabel(main_frame, text="Configure your API keys for premium services. Keys are stored in .env file for security.", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=10, pady=(0, 10))
         
-        # Scrollable frame for API keys
-        scroll_frame = ctk.CTkScrollableFrame(main_frame)
-        scroll_frame.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+        # Instructions
+        info_frame = ctk.CTkFrame(main_frame)
+        info_frame.pack(fill="x", padx=10, pady=(0, 10))
         
-        # HIBP API Key
-        hibp_frame = ctk.CTkFrame(scroll_frame)
-        hibp_frame.pack(fill="x", padx=5, pady=5)
+        instructions = (
+            "To configure API keys:\n"
+            "1. Copy .env.example to .env\n"
+            "2. Add your API keys to the .env file\n"
+            "3. Restart the application\n\n"
+            "API keys are loaded from environment variables for security."
+        )
+        ctk.CTkLabel(info_frame, text=instructions, font=ctk.CTkFont(size=10)).pack(anchor="w", padx=10, pady=10)
         
-        ctk.CTkLabel(hibp_frame, text="Have I Been Pwned API Key", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
-        ctk.CTkLabel(hibp_frame, text="Get your free API key at: https://haveibeenpwned.com/API/Key", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=10, pady=(0, 5))
+        # Check if .env exists
+        env_path = os.path.join(os.path.dirname(__file__), '.env')
+        if os.path.exists(env_path):
+            ctk.CTkLabel(main_frame, text="✅ .env file detected - API keys will be loaded from environment", font=ctk.CTkFont(size=10), text_color="#2d8659").pack(anchor="w", padx=10, pady=(0, 10))
+        else:
+            ctk.CTkLabel(main_frame, text="⚠️ .env file not found - Copy .env.example to .env and add your keys", font=ctk.CTkFont(size=10), text_color="#d4a017").pack(anchor="w", padx=10, pady=(0, 10))
         
-        self.hibp_key_entry = ctk.CTkEntry(hibp_frame, placeholder_text="Enter HIBP API key")
-        self.hibp_key_entry.pack(fill="x", padx=10, pady=(0, 5))
-        
-        # Load existing key
-        if 'hibp' in self.tool.api_keys:
-            self.hibp_key_entry.insert(0, self.tool.api_keys['hibp'])
-        
-        ctk.CTkButton(hibp_frame, text="Save HIBP Key", command=lambda: self.save_api_key('hibp', self.hibp_key_entry)).pack(fill="x", padx=10, pady=(0, 10))
-        
-        # VirusTotal API Key
-        vt_frame = ctk.CTkFrame(scroll_frame)
-        vt_frame.pack(fill="x", padx=5, pady=5)
-        
-        ctk.CTkLabel(vt_frame, text="VirusTotal API Key", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
-        ctk.CTkLabel(vt_frame, text="Get your free API key at: https://www.virustotal.com/", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=10, pady=(0, 5))
-        
-        self.vt_key_entry = ctk.CTkEntry(vt_frame, placeholder_text="Enter VirusTotal API key")
-        self.vt_key_entry.pack(fill="x", padx=10, pady=(0, 5))
-        
-        # Load existing key
-        if 'virustotal' in self.tool.api_keys:
-            self.vt_key_entry.insert(0, self.tool.api_keys['virustotal'])
-        
-        ctk.CTkButton(vt_frame, text="Save VirusTotal Key", command=lambda: self.save_api_key('virustotal', self.vt_key_entry)).pack(fill="x", padx=10, pady=(0, 10))
-        
-        # Spokeo API Key
-        spokeo_frame = ctk.CTkFrame(scroll_frame)
-        spokeo_frame.pack(fill="x", padx=5, pady=5)
-        
-        ctk.CTkLabel(spokeo_frame, text="Spokeo API Key", font=ctk.CTkFont(size=12, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
-        ctk.CTkLabel(spokeo_frame, text="Requires commercial subscription. Contact Spokeo for API access.", font=ctk.CTkFont(size=10)).pack(anchor="w", padx=10, pady=(0, 5))
-        
-        self.spokeo_key_entry = ctk.CTkEntry(spokeo_frame, placeholder_text="Enter Spokeo API key")
-        self.spokeo_key_entry.pack(fill="x", padx=10, pady=(0, 5))
-        
-        # Load existing key
-        if 'spokeo' in self.tool.api_keys:
-            self.spokeo_key_entry.insert(0, self.tool.api_keys['spokeo'])
-        
-        ctk.CTkButton(spokeo_frame, text="Save Spokeo Key", command=lambda: self.save_api_key('spokeo', self.spokeo_key_entry)).pack(fill="x", padx=10, pady=(0, 10))
-    
     def setup_security_tab(self):
-        """Setup security APIs tab."""
+        """Setup security tab."""
         # Input frame
         input_frame = ctk.CTkFrame(self.tab_security)
         input_frame.pack(fill="x", padx=10, pady=10)
         
-        # Title
-        ctk.CTkLabel(input_frame, text="Security API Lookups", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+        # Label
+        ctk.CTkLabel(input_frame, text="Query:", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
         
-        # Query entry
-        ctk.CTkLabel(input_frame, text="Query (IP, Domain, or Email):", font=ctk.CTkFont(size=12)).pack(anchor="w", padx=10, pady=(5, 2))
-        self.security_query_entry = ctk.CTkEntry(input_frame, placeholder_text="Enter IP, domain, or email")
+        # Entry with StringVar for reliable text tracking
+        self.security_query_var = tk.StringVar()
+        self.security_query_entry = ctk.CTkEntry(
+            input_frame,
+            placeholder_text="Enter email, phone, or name",
+            textvariable=self.security_query_var
+        )
         self.security_query_entry.pack(fill="x", padx=10, pady=(0, 10))
         
         # Buttons frame
@@ -415,16 +403,16 @@ class OSINTGUI:
         )
         self.hibp_btn.pack(side="left", fill="x", expand=True, padx=(0, 5))
         
-        # VirusTotal IP button
+        # VT IP button
         self.vt_ip_btn = ctk.CTkButton(
             button_frame,
             text="VT IP Scan",
             command=self.run_vt_ip_scan,
             height=40
         )
-        self.vt_ip_btn.pack(side="left", fill="x", expand=True, padx=(5, 5))
+        self.vt_ip_btn.pack(side="left", fill="x", expand=True, padx=(5, 0))
         
-        # VirusTotal Domain button
+        # VT domain button
         self.vt_domain_btn = ctk.CTkButton(
             button_frame,
             text="VT Domain Scan",
@@ -435,12 +423,23 @@ class OSINTGUI:
         
         # Spokeo button
         self.spokeo_btn = ctk.CTkButton(
-            input_frame,
+            button_frame,
             text="Spokeo Search",
             command=self.run_spokeo_search,
-            height=40
+            height=40,
+            fg_color="#1a5fb4"
         )
-        self.spokeo_btn.pack(fill="x", padx=10, pady=(0, 10))
+        self.spokeo_btn.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        
+        # Whitepages button
+        self.whitepages_btn = ctk.CTkButton(
+            button_frame,
+            text="WhitePages Person Search",
+            command=self.run_whitepages_search,
+            height=40,
+            fg_color="#1a5fb4"
+        )
+        self.whitepages_btn.pack(side="left", fill="x", expand=True, padx=(5, 0))
         
         # Save button
         self.save_security_btn = ctk.CTkButton(
@@ -464,18 +463,9 @@ class OSINTGUI:
         )
         self.security_results.pack(fill="both", expand=True, padx=10, pady=(0, 10))
     
-    def save_api_key(self, service, entry_widget):
-        """Save an API key for a service."""
-        key = entry_widget.get().strip()
-        if key:
-            self.tool.set_api_key(service, key)
-            messagebox.showinfo("Success", f"{service.capitalize()} API key saved successfully.")
-        else:
-            messagebox.showerror("Error", "Please enter an API key.")
-    
     def run_hibp_check(self):
         """Run HIBP breach check in a separate thread."""
-        query = self.security_query_entry.get().strip()
+        query = self.security_query_var.get().strip()
         if not query or '@' not in query:
             messagebox.showerror("Error", "Please enter a valid email address")
             return
@@ -484,7 +474,7 @@ class OSINTGUI:
         
         def lookup():
             try:
-                results = self.tool.hibp_breach_check(query)
+                results = self.security_handler.hibp_breach_check(query)
                 self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
             except Exception as e:
                 self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
@@ -495,7 +485,7 @@ class OSINTGUI:
     
     def run_vt_ip_scan(self):
         """Run VirusTotal IP scan in a separate thread."""
-        query = self.security_query_entry.get().strip()
+        query = self.security_query_var.get().strip()
         if not query:
             messagebox.showerror("Error", "Please enter an IP address")
             return
@@ -504,7 +494,7 @@ class OSINTGUI:
         
         def lookup():
             try:
-                results = self.tool.virustotal_ip_scan(query)
+                results = self.security_handler.virustotal_ip_scan(query)
                 self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
             except Exception as e:
                 self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
@@ -515,7 +505,7 @@ class OSINTGUI:
     
     def run_vt_domain_scan(self):
         """Run VirusTotal domain scan in a separate thread."""
-        query = self.security_query_entry.get().strip()
+        query = self.security_query_var.get().strip()
         if not query:
             messagebox.showerror("Error", "Please enter a domain")
             return
@@ -524,7 +514,7 @@ class OSINTGUI:
         
         def lookup():
             try:
-                results = self.tool.virustotal_domain_scan(query)
+                results = self.security_handler.virustotal_domain_scan(query)
                 self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
             except Exception as e:
                 self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
@@ -535,7 +525,7 @@ class OSINTGUI:
     
     def run_spokeo_search(self):
         """Run Spokeo search in a separate thread."""
-        query = self.security_query_entry.get().strip()
+        query = self.security_query_var.get().strip()
         if not query:
             messagebox.showerror("Error", "Please enter a search query")
             return
@@ -544,7 +534,7 @@ class OSINTGUI:
         
         def lookup():
             try:
-                results = self.tool.spokeo_search(query)
+                results = self.security_handler.spokeo_search(query)
                 self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
             except Exception as e:
                 self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
@@ -552,8 +542,76 @@ class OSINTGUI:
                 self.root.after(0, lambda: self.spokeo_btn.configure(state="normal", text="Spokeo Search"))
         
         threading.Thread(target=lookup, daemon=True).start()
+    
+    def run_whitepages_search(self):
+        """Run WhitePages person search in a separate thread."""
+        query = self.security_query_var.get().strip()
         
-    def display_results(self, text_widget, data, result_type='ip'):
+        if not query:
+            messagebox.showerror("Error", "Please enter a valid search query (email, phone, or name)")
+            return
+        
+        # Determine search type based on query content
+        search_type = self._determine_whitepages_search_type(query)
+        
+        # Show user what type was detected
+        type_labels = {
+            'email': 'Email',
+            'phone': 'Phone',
+            'name': 'Name'
+        }
+        self.whitepages_btn.configure(state="disabled", text=f"Searching as {type_labels[search_type]}...")
+        
+        def lookup():
+            try:
+                results = self.security_handler.whitepages_person_search(query, search_type)
+                self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
+            except Exception as e:
+                self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
+            finally:
+                self.root.after(0, lambda: self.whitepages_btn.configure(state="normal", text="WhitePages Person Search"))
+        
+        threading.Thread(target=lookup, daemon=True).start()
+    
+    def _determine_whitepages_search_type(self, query: str) -> str:
+        """
+        Determine the type of WhitePages search based on query content.
+        
+        This method uses pattern matching to identify:
+        - Email addresses (contains @ and domain)
+        - Phone numbers (digits with optional formatting)
+        - Names (default fallback)
+        
+        Args:
+            query: The search query string from the user
+            
+        Returns:
+            str: The search type ('email', 'phone', or 'name')
+        """
+        # Normalize query for analysis
+        normalized = query.strip().lower()
+        
+        # Email pattern: contains @ and has a domain with at least one dot
+        if '@' in normalized:
+            parts = normalized.split('@')
+            if len(parts) == 2 and '.' in parts[1] and len(parts[1]) > 3:
+                return 'email'
+        
+        # Phone pattern: extract digits and check length
+        # Remove all non-digit characters
+        digits_only = ''.join(char for char in query if char.isdigit())
+        
+        # Phone numbers are typically 10-15 digits (with country code)
+        if len(digits_only) >= 10 and len(digits_only) <= 15:
+            # Additional check: ensure it's not just random numbers
+            # Phone numbers usually have some pattern
+            if len(digits_only) >= 10:
+                return 'phone'
+        
+        # Default to name search for anything else
+        return 'name'
+    
+    def display_results(self, text_widget, data, result_type='ip', email_input=None):
         """Display results in the specified text widget with formatting."""
         text_widget.delete(1.0, "end")
         
@@ -569,10 +627,13 @@ class OSINTGUI:
         
         # Extract and store discovered entities
         if 'error' not in data:
-            self.extract_entities(data, result_type)
+            if result_type == 'email' and email_input:
+                self.entity_extractor._extract_from_email(data, result_type, datetime.now().strftime('%Y-%m-%d %H:%M:%S'), email_input)
+            else:
+                self.entity_extractor.extract_entities(data, result_type)
         
         # Format and display results
-        formatted = self.format_results(data, result_type)
+        formatted = format_results(data, result_type)
         text_widget.insert("end", formatted)
         
         # Update intelligence display
@@ -581,183 +642,6 @@ class OSINTGUI:
         # Auto-propagate if enabled
         if self.auto_propagate and 'error' not in data:
             self.auto_propagate_entities(data, result_type)
-    
-    def format_results(self, data, result_type):
-        """Format results for better readability."""
-        if 'error' in data:
-            return f"❌ Error: {data['error']}"
-        
-        output = []
-        output.append("=" * 60)
-        output.append(f"📊 OSINT Results - {result_type.upper()} LOOKUP")
-        output.append(f"⏰ Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        output.append("=" * 60)
-        output.append("")
-        
-        if result_type == 'ip':
-            output.append("🌍 GEOLOCATION INFORMATION")
-            output.append("-" * 40)
-            if 'ip' in data:
-                output.append(f"IP Address: {data['ip']}")
-            if 'country' in data:
-                output.append(f"Country: {data['country']} ({data.get('country_code', 'N/A')})")
-            if 'region' in data:
-                output.append(f"Region: {data['region']}")
-            if 'city' in data:
-                output.append(f"City: {data['city']}")
-            if 'zip' in data:
-                output.append(f"Postal Code: {data['zip']}")
-            if 'lat' in data and 'lon' in data:
-                output.append(f"Coordinates: {data['lat']}, {data['lon']}")
-            if 'timezone' in data:
-                output.append(f"Timezone: {data['timezone']}")
-            output.append("")
-            output.append("🏢 NETWORK INFORMATION")
-            output.append("-" * 40)
-            if 'isp' in data:
-                output.append(f"ISP: {data['isp']}")
-            if 'org' in data:
-                output.append(f"Organization: {data['org']}")
-            if 'as' in data:
-                output.append(f"AS Number: {data['as']}")
-            output.append("")
-            output.append("🔒 SECURITY FLAGS")
-            output.append("-" * 40)
-            output.append(f"Mobile: {'Yes' if data.get('is_mobile') else 'No'}")
-            output.append(f"Proxy: {'Yes' if data.get('is_proxy') else 'No'}")
-            output.append(f"VPN/Hosting: {'Yes' if data.get('is_vpn') else 'No'}")
-            
-        elif result_type == 'domain':
-            if 'domain_name' in data or 'registrar' in data:
-                output.append("📋 WHOIS INFORMATION")
-                output.append("-" * 40)
-                if 'domain_name' in data:
-                    output.append(f"Domain Name: {data['domain_name']}")
-                if 'registrar' in data:
-                    output.append(f"Registrar: {data['registrar']}")
-                if 'creation_date' in data:
-                    output.append(f"Created: {data['creation_date']}")
-                if 'expiration_date' in data:
-                    output.append(f"Expires: {data['expiration_date']}")
-                if 'name_servers' in data:
-                    output.append(f"Name Servers: {', '.join(str(ns) for ns in data['name_servers']) if isinstance(data['name_servers'], list) else data['name_servers']}")
-                if 'status' in data:
-                    output.append(f"Status: {data['status']}")
-                output.append("")
-            
-            if 'A' in data or 'MX' in data:
-                output.append("🌐 DNS RECORDS")
-                output.append("-" * 40)
-                record_types = ['A', 'AAAA', 'MX', 'NS', 'TXT', 'CNAME', 'SOA']
-                for rt in record_types:
-                    if rt in data and data[rt]:
-                        output.append(f"{rt} Records:")
-                        if isinstance(data[rt], list):
-                            for record in data[rt]:
-                                output.append(f"  • {record}")
-                        else:
-                            output.append(f"  • {data[rt]}")
-                if 'ip_address' in data:
-                    output.append(f"\nIP Address: {data['ip_address']}")
-                    
-        elif result_type == 'email':
-            output.append("📧 EMAIL VALIDATION")
-            output.append("-" * 40)
-            output.append(f"Valid Format: {'✅ Yes' if data.get('valid_format') else '❌ No'}")
-            if 'domain' in data:
-                output.append(f"Domain: {data['domain']}")
-            output.append(f"Domain Exists: {'✅ Yes' if data.get('domain_exists') else '❌ No'}")
-            output.append(f"Domain Has Mail: {'✅ Yes' if data.get('domain_has_mail') else '❌ No'}")
-            if 'mx_records' in data and data['mx_records']:
-                output.append("\nMX Records:")
-                for mx in data['mx_records']:
-                    output.append(f"  • {mx}")
-        
-        elif result_type == 'reverse':
-            output.append("🔄 REVERSE DNS LOOKUP")
-            output.append("-" * 40)
-            if 'ip' in data:
-                output.append(f"IP Address: {data['ip']}")
-            if 'hostname' in data:
-                output.append(f"Hostname: {data['hostname']}")
-            if 'aliases' in data and data['aliases']:
-                output.append(f"Aliases: {', '.join(data['aliases'])}")
-            if 'ip_addresses' in data and data['ip_addresses']:
-                output.append(f"IP Addresses: {', '.join(data['ip_addresses'])}")
-        
-        elif result_type == 'security':
-            if 'email' in data and 'breaches' in data:
-                # HIBP results
-                output.append("🔓 HAVE I BEEN PWNED - BREACH CHECK")
-                output.append("-" * 40)
-                output.append(f"Email: {data['email']}")
-                output.append(f"Breaches Found: {'Yes' if data.get('found') else 'No'}")
-                if data.get('breach_count'):
-                    output.append(f"Total Breaches: {data['breach_count']}")
-                if data.get('breaches'):
-                    output.append("")
-                    output.append("BREACH DETAILS:")
-                    for i, breach in enumerate(data['breaches'], 1):
-                        output.append(f"\n{i}. {breach.get('name', 'Unknown')}")
-                        output.append(f"   Title: {breach.get('title', 'N/A')}")
-                        output.append(f"   Domain: {breach.get('domain', 'N/A')}")
-                        output.append(f"   Breach Date: {breach.get('breach_date', 'N/A')}")
-                        output.append(f"   Pwn Count: {breach.get('pwn_count', 'N/A')}")
-                        output.append(f"   Data Classes: {', '.join(breach.get('data_classes', []))}")
-                        output.append(f"   Verified: {'Yes' if breach.get('is_verified') else 'No'}")
-                        output.append(f"   Sensitive: {'Yes' if breach.get('is_sensitive') else 'No'}")
-            
-            elif 'ip' in data and 'reputation' in data:
-                # VirusTotal IP results
-                output.append("🦠 VIRUSTOTAL - IP SCAN")
-                output.append("-" * 40)
-                output.append(f"IP: {data['ip']}")
-                output.append(f"Reputation Score: {data['reputation']}")
-                if data.get('country'):
-                    output.append(f"Country: {data['country']}")
-                if data.get('asn'):
-                    output.append(f"ASN: {data['asn']}")
-                if data.get('as_owner'):
-                    output.append(f"AS Owner: {data['as_owner']}")
-                if data.get('last_analysis_stats'):
-                    output.append("")
-                    output.append("ANALYSIS STATS:")
-                    for engine, count in data['last_analysis_stats'].items():
-                        output.append(f"  {engine}: {count}")
-            
-            elif 'domain' in data and 'reputation' in data:
-                # VirusTotal Domain results
-                output.append("🦠 VIRUSTOTAL - DOMAIN SCAN")
-                output.append("-" * 40)
-                output.append(f"Domain: {data['domain']}")
-                output.append(f"Reputation Score: {data['reputation']}")
-                if data.get('categories'):
-                    output.append(f"Categories: {data['categories']}")
-                if data.get('creation_date'):
-                    output.append(f"Creation Date: {data['creation_date']}")
-                if data.get('last_analysis_stats'):
-                    output.append("")
-                    output.append("ANALYSIS STATS:")
-                    for engine, count in data['last_analysis_stats'].items():
-                        output.append(f"  {engine}: {count}")
-            
-            elif 'query' in data and 'search_type' in data:
-                # Spokeo results
-                output.append("👤 SPOKEO SEARCH")
-                output.append("-" * 40)
-                output.append(f"Query: {data['query']}")
-                output.append(f"Search Type: {data['search_type']}")
-                output.append(f"Total Results: {data.get('total_results', 0)}")
-                if data.get('results'):
-                    output.append("")
-                    output.append("RESULTS:")
-                    for i, result in enumerate(data['results'][:10], 1):  # Limit to first 10
-                        output.append(f"\n{i}. {str(result)[:200]}...")  # Truncate long results
-        
-        output.append("")
-        output.append("=" * 60)
-        
-        return "\n".join(output)
         
     def run_ip_geolocation(self):
         """Run IP geolocation lookup in a separate thread."""
@@ -851,7 +735,7 @@ class OSINTGUI:
         def lookup():
             try:
                 results = self.tool.email_validation(email)
-                self.root.after(0, lambda: self.display_results(self.email_results, results, 'email'))
+                self.root.after(0, lambda: self.display_results(self.email_results, results, 'email', email))
             except Exception as e:
                 self.root.after(0, lambda: self.display_results(self.email_results, {"error": str(e)}, 'email'))
             finally:
@@ -951,186 +835,22 @@ class OSINTGUI:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save results: {str(e)}")
     
-    def extract_entities(self, data, result_type):
-        """Extract entities from lookup results."""
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        if result_type == 'ip':
-            # Extract IP
-            if 'ip' in data:
-                self.discovered_entities['ips'].add(data['ip'])
-                self.entity_history.append({'type': 'ip', 'value': data['ip'], 'source': result_type, 'timestamp': timestamp})
-            
-            # Extract domain from org/isp if present
-            for field in ['org', 'isp']:
-                if field in data and data[field]:
-                    domains = self.extract_domains_from_text(str(data[field]))
-                    for domain in domains:
-                        if domain not in self.discovered_entities['domains']:
-                            self.discovered_entities['domains'].add(domain)
-                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_{field}", 'timestamp': timestamp})
-        
-        elif result_type == 'domain':
-            # Extract domain
-            if 'domain_name' in data:
-                domain = data['domain_name']
-                if isinstance(domain, list):
-                    domain = domain[0] if domain else None
-                if domain:
-                    self.discovered_entities['domains'].add(str(domain))
-                    self.entity_history.append({'type': 'domain', 'value': str(domain), 'source': result_type, 'timestamp': timestamp})
-            
-            # Extract IPs from DNS records
-            if 'ip_address' in data and data['ip_address'] and not data['ip_address'].startswith('Error'):
-                self.discovered_entities['ips'].add(data['ip_address'])
-                self.entity_history.append({'type': 'ip', 'value': data['ip_address'], 'source': f"{result_type}_dns", 'timestamp': timestamp})
-            
-            # Extract IPs from A records
-            if 'A' in data and data['A']:
-                for record in data['A']:
-                    ips = self.extract_ips_from_text(record)
-                    for ip in ips:
-                        if ip not in self.discovered_entities['ips']:
-                            self.discovered_entities['ips'].add(ip)
-                            self.entity_history.append({'type': 'ip', 'value': ip, 'source': f"{result_type}_A", 'timestamp': timestamp})
-            
-            # Extract domains from name servers
-            if 'name_servers' in data and data['name_servers']:
-                for ns in data['name_servers']:
-                    domains = self.extract_domains_from_text(str(ns))
-                    for domain in domains:
-                        if domain not in self.discovered_entities['domains']:
-                            self.discovered_entities['domains'].add(domain)
-                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_ns", 'timestamp': timestamp})
-            
-            # Extract emails from WHOIS
-            if 'emails' in data and data['emails']:
-                for email in data['emails']:
-                    if email and '@' in str(email):
-                        email_str = str(email).strip()
-                        if email_str not in self.discovered_entities['emails']:
-                            self.discovered_entities['emails'].add(email_str)
-                            self.entity_history.append({'type': 'email', 'value': email_str, 'source': f"{result_type}_whois", 'timestamp': timestamp})
-        
-        elif result_type == 'email':
-            # Extract email
-            if 'valid_format' in data and data['valid_format']:
-                # Reconstruct email from entry
-                email = self.email_entry.get().strip()
-                if email not in self.discovered_entities['emails']:
-                    self.discovered_entities['emails'].add(email)
-                    self.entity_history.append({'type': 'email', 'value': email, 'source': result_type, 'timestamp': timestamp})
-            
-            # Extract domain
-            if 'domain' in data:
-                if data['domain'] not in self.discovered_entities['domains']:
-                    self.discovered_entities['domains'].add(data['domain'])
-                    self.entity_history.append({'type': 'domain', 'value': data['domain'], 'source': f"{result_type}_domain", 'timestamp': timestamp})
-            
-            # Extract domains from MX records
-            if 'mx_records' in data and data['mx_records']:
-                for mx in data['mx_records']:
-                    domains = self.extract_domains_from_text(mx)
-                    for domain in domains:
-                        if domain not in self.discovered_entities['domains']:
-                            self.discovered_entities['domains'].add(domain)
-                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_mx", 'timestamp': timestamp})
-        
-        elif result_type == 'reverse':
-            # Extract IP
-            if 'ip' in data:
-                self.discovered_entities['ips'].add(data['ip'])
-                self.entity_history.append({'type': 'ip', 'value': data['ip'], 'source': result_type, 'timestamp': timestamp})
-            
-            # Extract domain from hostname
-            if 'hostname' in data:
-                domains = self.extract_domains_from_text(data['hostname'])
-                for domain in domains:
-                    if domain not in self.discovered_entities['domains']:
-                        self.discovered_entities['domains'].add(domain)
-                        self.entity_history.append({'type': 'domain', 'value': domain, 'source': f"{result_type}_hostname", 'timestamp': timestamp})
-        
-        elif result_type == 'security':
-            # Extract entities from security API results
-            if 'email' in data:
-                # HIBP results
-                if data.get('email') and '@' in data['email']:
-                    email = data['email']
-                    if email not in self.discovered_entities['emails']:
-                        self.discovered_entities['emails'].add(email)
-                        self.entity_history.append({'type': 'email', 'value': email, 'source': 'hibp', 'timestamp': timestamp})
-                
-                # Extract domains from breach data
-                if data.get('breaches'):
-                    for breach in data['breaches']:
-                        if breach.get('domain'):
-                            domain = breach['domain']
-                            if domain not in self.discovered_entities['domains']:
-                                self.discovered_entities['domains'].add(domain)
-                                self.entity_history.append({'type': 'domain', 'value': domain, 'source': 'hibp_breach', 'timestamp': timestamp})
-            
-            elif 'ip' in data and 'reputation' in data:
-                # VirusTotal IP results
-                ip = data['ip']
-                if ip not in self.discovered_entities['ips']:
-                    self.discovered_entities['ips'].add(ip)
-                    self.entity_history.append({'type': 'ip', 'value': ip, 'source': 'virustotal_ip', 'timestamp': timestamp})
-                
-                # Extract domain from AS owner
-                if data.get('as_owner'):
-                    domains = self.extract_domains_from_text(data['as_owner'])
-                    for domain in domains:
-                        if domain not in self.discovered_entities['domains']:
-                            self.discovered_entities['domains'].add(domain)
-                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': 'virustotal_as_owner', 'timestamp': timestamp})
-            
-            elif 'domain' in data and 'reputation' in data:
-                # VirusTotal Domain results
-                domain = data['domain']
-                if domain not in self.discovered_entities['domains']:
-                    self.discovered_entities['domains'].add(domain)
-                    self.entity_history.append({'type': 'domain', 'value': domain, 'source': 'virustotal_domain', 'timestamp': timestamp})
-            
-            elif 'query' in data and 'search_type' in data:
-                # Spokeo results
-                query = data['query']
-                if '@' in query:
-                    # Email query
-                    if query not in self.discovered_entities['emails']:
-                        self.discovered_entities['emails'].add(query)
-                        self.entity_history.append({'type': 'email', 'value': query, 'source': 'spokeo', 'timestamp': timestamp})
-                else:
-                    # Could be domain or other
-                    domains = self.extract_domains_from_text(query)
-                    for domain in domains:
-                        if domain not in self.discovered_entities['domains']:
-                            self.discovered_entities['domains'].add(domain)
-                            self.entity_history.append({'type': 'domain', 'value': domain, 'source': 'spokeo', 'timestamp': timestamp})
-    
-    def extract_ips_from_text(self, text):
-        """Extract IP addresses from text."""
-        ip_pattern = r'\b(?:\d{1,3}\.){3}\d{1,3}\b'
-        return re.findall(ip_pattern, str(text))
-    
-    def extract_domains_from_text(self, text):
-        """Extract domain names from text."""
-        domain_pattern = r'\b[a-zA-Z0-9][a-zA-Z0-9-]{0,61}[a-zA-Z0-9]\.[a-zA-Z]{2,}\b'
-        return re.findall(domain_pattern, str(text))
-    
     def update_intel_display(self):
         """Update the collected intelligence display."""
         # Clear existing widgets
         for widget in self.intel_scroll.winfo_children():
             widget.destroy()
         
+        entities = self.entity_extractor.discovered_entities
+        
         # IPs section
-        if self.discovered_entities['ips']:
+        if entities['ips']:
             ip_frame = ctk.CTkFrame(self.intel_scroll)
             ip_frame.pack(fill="x", padx=5, pady=5)
             
-            ctk.CTkLabel(ip_frame, text=f"🌐 IP Addresses ({len(self.discovered_entities['ips'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+            ctk.CTkLabel(ip_frame, text=f"🌐 IP Addresses ({len(entities['ips'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
             
-            for ip in sorted(self.discovered_entities['ips']):
+            for ip in sorted(entities['ips']):
                 ip_item = ctk.CTkFrame(ip_frame, fg_color="transparent")
                 ip_item.pack(fill="x", padx=10, pady=2)
                 
@@ -1151,13 +871,13 @@ class OSINTGUI:
                 ).pack(side="left", padx=2)
         
         # Domains section
-        if self.discovered_entities['domains']:
+        if entities['domains']:
             domain_frame = ctk.CTkFrame(self.intel_scroll)
             domain_frame.pack(fill="x", padx=5, pady=5)
             
-            ctk.CTkLabel(domain_frame, text=f"🔗 Domains ({len(self.discovered_entities['domains'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+            ctk.CTkLabel(domain_frame, text=f"🔗 Domains ({len(entities['domains'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
             
-            for domain in sorted(self.discovered_entities['domains']):
+            for domain in sorted(entities['domains']):
                 domain_item = ctk.CTkFrame(domain_frame, fg_color="transparent")
                 domain_item.pack(fill="x", padx=10, pady=2)
                 
@@ -1178,13 +898,13 @@ class OSINTGUI:
                 ).pack(side="left", padx=2)
         
         # Emails section
-        if self.discovered_entities['emails']:
+        if entities['emails']:
             email_frame = ctk.CTkFrame(self.intel_scroll)
             email_frame.pack(fill="x", padx=5, pady=5)
             
-            ctk.CTkLabel(email_frame, text=f"📧 Emails ({len(self.discovered_entities['emails'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
+            ctk.CTkLabel(email_frame, text=f"📧 Emails ({len(entities['emails'])})", font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w", padx=10, pady=(10, 5))
             
-            for email in sorted(self.discovered_entities['emails']):
+            for email in sorted(entities['emails']):
                 email_item = ctk.CTkFrame(email_frame, fg_color="transparent")
                 email_item.pack(fill="x", padx=10, pady=2)
                 
@@ -1198,7 +918,7 @@ class OSINTGUI:
                 ).pack(side="left", padx=2)
         
         # Show empty state if no entities
-        if not any(self.discovered_entities.values()):
+        if not any(entities.values()):
             ctk.CTkLabel(self.intel_scroll, text="No entities discovered yet. Perform lookups to populate this tab.", font=ctk.CTkFont(size=12)).pack(pady=20)
     
     def investigate_ip(self, ip, lookup_type):
@@ -1235,7 +955,7 @@ class OSINTGUI:
     def auto_propagate_entities(self, data, result_type):
         """Automatically investigate newly discovered entities."""
         # Get newly discovered entities (last few entries in history)
-        new_entities = self.entity_history[-5:] if len(self.entity_history) > 5 else self.entity_history
+        new_entities = self.entity_extractor.entity_history[-5:] if len(self.entity_extractor.entity_history) > 5 else self.entity_extractor.entity_history
         
         for entity in new_entities:
             # Skip the original entity we just looked up
@@ -1252,14 +972,14 @@ class OSINTGUI:
     
     def clear_intelligence(self):
         """Clear all collected intelligence."""
-        self.discovered_entities = {'ips': set(), 'domains': set(), 'emails': set()}
-        self.entity_history = []
+        self.entity_extractor.clear_all()
         self.update_intel_display()
         messagebox.showinfo("Cleared", "All collected intelligence has been cleared.")
     
     def save_intelligence(self):
         """Save collected intelligence to a file."""
-        if not any(self.discovered_entities.values()):
+        entities = self.entity_extractor.get_entities_dict()
+        if not any(entities.values()):
             messagebox.showerror("Error", "No intelligence to save.")
             return
         
@@ -1278,12 +998,8 @@ class OSINTGUI:
         try:
             intelligence_data = {
                 'timestamp': timestamp,
-                'entities': {
-                    'ips': list(self.discovered_entities['ips']),
-                    'domains': list(self.discovered_entities['domains']),
-                    'emails': list(self.discovered_entities['emails'])
-                },
-                'history': self.entity_history
+                'entities': entities,
+                'history': self.entity_extractor.entity_history
             }
             
             with open(file_path, 'w') as f:
