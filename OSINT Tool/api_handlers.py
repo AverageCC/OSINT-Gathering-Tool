@@ -4,6 +4,7 @@ Handles integration with Have I Been Pwned, VirusTotal, Spokeo, and WhitePages A
 """
 
 import os
+import time
 from typing import Dict, Any
 import requests
 from dotenv import load_dotenv
@@ -31,7 +32,8 @@ class SecurityAPIHandler:
             'hibp': 'HIBP_API_KEY',
             'virustotal': 'VIRUSTOTAL_API_KEY',
             'spokeo': 'SPOKEO_API_KEY',
-            'whitepages': 'WHITEPAGES_API_KEY'
+            'whitepages': 'WHITEPAGES_API_KEY',
+            'osintly': 'OSINTLY_API_KEY'
         }
         
         env_key = key_map.get(service)
@@ -266,3 +268,96 @@ class SecurityAPIHandler:
             
         except Exception as e:
             return {'error': f'WhitePages API error: {str(e)}'}
+
+    def osintly_search(self, query: str, query_type: str = None) -> Dict[str, Any]:
+        """
+        Search Osint.ly for an email address or phone number.
+        The API creates an asynchronous search and this method polls for results.
+        """
+        api_key = self._get_api_key('osintly')
+        if not api_key:
+            return {'error': 'Osint.ly API key required. Add OSINTLY_API_KEY to your .env file.'}
+
+        normalized = query.strip().lower()
+
+        # Determine query type if not provided
+        if not query_type:
+            if '@' in normalized:
+                query_type = 'Email Address'
+            else:
+                digits = ''.join(char for char in query if char.isdigit())
+                if len(digits) >= 10:
+                    query_type = 'Phone Number'
+
+        if not query_type:
+            return {'error': 'Osint.ly requires an email address or phone number.'}
+
+        base_url = 'https://api.osint.ly'
+        headers = {
+            'Authorization': f'Bearer {api_key}',
+            'Content-Type': 'application/json'
+        }
+
+        try:
+            # Create the search
+            payload = {
+                'query': {
+                    'type': query_type,
+                    'value': query.strip()
+                },
+                'features': {
+                    'breached_accounts': True,
+                    'registered_accounts': 'include'
+                },
+                'cache': {
+                    'mode': 'prefer'
+                }
+            }
+
+            response = self.session.post(f'{base_url}/search', headers=headers, json=payload, timeout=30)
+            if response.status_code == 401:
+                return {'error': 'Invalid Osint.ly API key'}
+            elif response.status_code == 403:
+                return {'error': 'Osint.ly API access forbidden. Check your subscription plan.'}
+
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract search ID from possible response shapes
+            search_id = data.get('search', {}).get('id') or data.get('id')
+            if not search_id:
+                return {'error': 'Failed to create Osint.ly search', 'response': data}
+
+            # Poll for results
+            result_url = f'{base_url}/search/{search_id}/results'
+            partial_data = None
+
+            for _ in range(20):
+                time.sleep(3)
+                result_response = self.session.get(result_url, headers=headers, timeout=30)
+
+                if result_response.status_code == 200:
+                    result_data = result_response.json()
+                    partial_data = result_data
+
+                    status = result_data.get('status', '').lower()
+                    if result_data.get('ok') and (status in ('completed', 'done') or result_data.get('result') is not None):
+                        return {
+                            'query': query,
+                            'query_type': query_type,
+                            'search_id': search_id,
+                            'results': result_data.get('result', {}),
+                            'status': status
+                        }
+
+            return {
+                'query': query,
+                'query_type': query_type,
+                'search_id': search_id,
+                'status': partial_data.get('status', 'pending') if partial_data else 'pending',
+                'message': 'Osint.ly search is still running. Retrieve it later with the search ID.',
+                'partial_results': partial_data.get('result') if partial_data else None
+            }
+
+        except Exception as e:
+            return {'error': f'Osint.ly API error: {str(e)}'}

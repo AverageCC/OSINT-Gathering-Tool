@@ -440,7 +440,17 @@ class OSINTGUI:
             fg_color="#1a5fb4"
         )
         self.whitepages_btn.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        
+
+        # Osint.ly button
+        self.osintly_btn = ctk.CTkButton(
+            button_frame,
+            text="Osint.ly Search",
+            command=self.run_osintly_search,
+            height=40,
+            fg_color="#8b5cf6"
+        )
+        self.osintly_btn.pack(side="left", fill="x", expand=True, padx=(5, 0))
+
         # Save button
         self.save_security_btn = ctk.CTkButton(
             input_frame,
@@ -573,6 +583,27 @@ class OSINTGUI:
         
         threading.Thread(target=lookup, daemon=True).start()
     
+    def run_osintly_search(self):
+        """Run Osint.ly search in a separate thread."""
+        query = self.security_query_var.get().strip()
+
+        if not query:
+            messagebox.showerror("Error", "Please enter an email address or phone number")
+            return
+
+        self.osintly_btn.configure(state="disabled", text="Searching...")
+
+        def lookup():
+            try:
+                results = self.security_handler.osintly_search(query)
+                self.root.after(0, lambda: self.display_results(self.security_results, results, 'security'))
+            except Exception as e:
+                self.root.after(0, lambda: self.display_results(self.security_results, {"error": str(e)}, 'security'))
+            finally:
+                self.root.after(0, lambda: self.osintly_btn.configure(state="normal", text="Osint.ly Search"))
+
+        threading.Thread(target=lookup, daemon=True).start()
+
     def _determine_whitepages_search_type(self, query: str) -> str:
         """
         Determine the type of WhitePages search based on query content.
